@@ -7,8 +7,6 @@ local timer_at = ngx.timer.at
 
 
 prometheus.init()
-
-
 local function log(premature, message)
   if premature then
     return
@@ -23,6 +21,11 @@ local PrometheusHandler = {
   VERSION  = "0.4.1",
 }
 
+
+function PrometheusHandler:init_worker()
+   PrometheusHandler.super.init_worker(self)
+   -- TODO init shdict for each worker here
+end
 
 function PrometheusHandler:log(_)
   local message = basic_serializer.serialize(ngx)
