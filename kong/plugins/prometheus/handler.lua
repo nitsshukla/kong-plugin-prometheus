@@ -1,4 +1,4 @@
-local prometheus = require "kong.plugins.prometheus.exporter"
+local exporter = require "kong.plugins.prometheus.exporter"
 local basic_serializer = require "kong.plugins.log-serializers.basic"
 
 
@@ -6,8 +6,7 @@ local kong = kong
 local timer_at = ngx.timer.at
 
 
-prometheus.init()
-
+exporter.init()
 
 local PrometheusHandler = {
   PRIORITY = 13,
@@ -16,8 +15,8 @@ local PrometheusHandler = {
 
 
 function PrometheusHandler:init_worker()
-   PrometheusHandler.super.init_worker(self)
-   -- TODO init shdict for each worker here
+  ngx.timer.every(2, exporter.sync)
+  -- TODO init shdict for each worker here
 end
 
 function PrometheusHandler:log(_)

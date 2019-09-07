@@ -1,11 +1,88 @@
+local worker_cache = require("kong.plugins.prometheus.worker_cache")
+
 local find = string.find
 local select = select
 
 local DEFAULT_BUCKETS = { 1, 2, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 70,
                           80, 90, 100, 200, 300, 400, 500, 1000,
                           2000, 5000, 10000, 30000, 60000 }
+
 local metrics = {}
 local prometheus
+
+local metrics_meta = {
+  nginx_http_current_connections = {
+    type        = "gauge",
+    description = "Number of HTTP connections",
+    labels      = {"state"},
+  },
+  db_reachable = {
+    type        = "gauge",
+    description = "Datastore reachable from Kong, 0 is unreachable",
+    labels      = nil,
+  },
+
+  http_status = {
+    type        = "counter",
+    description = "HTTP status codes per service in Kong",
+    labels      = {"code", "service"},
+  },
+  bandwidth = {
+    type        = "counter",
+    description = "Total bandwidth in bytes consumed per service in Kong",
+    labels      = {"type", "service"},
+  },
+
+  latency = {
+    type        = "histogram",
+    description = "Latency added by Kong, total request time and upstream latency for each service in Kong",
+    labels      = {"type", "service"},
+  },
+
+}
+
+
+--[[
+local worker_cache = {
+  -- counter or gauge
+  nginx_http_current_connections = {
+    {"ingress", "service1"} = 111,
+    {"egress", "service1"} = 222,
+  },
+ -- histogram
+ nginx_http_current_connections = {
+    {"ingress", "service1"} = {
+      "1": 1,
+      "2": 2,
+      "5": 10, 
+    },
+  },
+}
+]]
+
+local function sync()
+  kong.log.err("sync run ")
+
+  local errors = {}
+  local error_count = 0
+  for k, v in pairs(worker_cache.cache) do
+    local meta = metrics_meta[k]
+    if meta.type == "gauge" then
+      for label_values, value in pairs(v) do
+        kong.log.err("set ", k, value, require("cjson").encode(label_values))
+        metrics[k]:set(value, label_values)
+      end
+    elseif meta.type == "counter" then
+      -- TODO: check_labels
+      for label_values, value in pairs(v) do
+        metrics[k].prometheus:set(k, meta.labels, label_values, value)
+      end
+    elseif meta.type == "histogram" then
+      -- TODO: check_labels
+      -- NYI
+    end
+  end
+end
 
 
 local function init()
@@ -17,24 +94,11 @@ local function init()
 
   prometheus = require("kong.plugins.prometheus.prometheus").init(shm, "kong_")
 
-  -- across all services
-  metrics.connections = prometheus:gauge("nginx_http_current_connections",
-                                         "Number of HTTP connections",
-                                         {"state"})
-  metrics.db_reachable = prometheus:gauge("datastore_reachable",
-                                          "Datastore reachable from Kong, 0 is unreachable")
+  for name, meta in pairs(metrics_meta) do
+    worker_cache.cache[name] = {}
+    metrics[name] = prometheus[meta.type](prometheus, name, meta.description, meta.labels)
+  end
 
-  -- per service
-  metrics.status = prometheus:counter("http_status",
-                                      "HTTP status codes per service in Kong",
-                                      {"code", "service"})
-  metrics.latency = prometheus:histogram("latency",
-                                         "Latency added by Kong, total request time and upstream latency for each service in Kong",
-                                         {"type", "service"},
-                                         DEFAULT_BUCKETS) -- TODO make this configurable
-  metrics.bandwidth = prometheus:counter("bandwidth",
-                                         "Total bandwidth in bytes consumed per service in Kong",
-                                         {"type", "service"})
 end
 
 
@@ -54,7 +118,11 @@ local function log(message)
     return
   end
 
-  metrics.status:inc(1, { message.response.status, service_name })
+  worker_cache.inc("http_status", 1,  { message.response.status, service_name })
+
+  worker_cache.inc("bandwidth", 1,  { "ingress", service_name })
+
+  --[[metrics.status:inc(1, { message.response.status, service_name })
 
   local request_size = tonumber(message.request.size)
   if request_size and request_size > 0 then
@@ -79,7 +147,7 @@ local function log(message)
   local kong_proxy_latency = message.latencies.kong
   if kong_proxy_latency ~= nil and kong_proxy_latency >= 0 then
     metrics.latency:observe(kong_proxy_latency, { "kong", service_name })
-  end
+  end]]--
 end
 
 
@@ -99,15 +167,15 @@ local function collect()
   else
     local accepted, handled, total = select(3, find(r.body,
                                             "accepts handled requests\n (%d*) (%d*) (%d*)"))
-    metrics.connections:set(accepted, { "accepted" })
-    metrics.connections:set(handled, { "handled" })
-    metrics.connections:set(total, { "total" })
+    metrics.nginx_http_current_connections:set(accepted, { "accepted" })
+    metrics.nginx_http_current_connections:set(handled, { "handled" })
+    metrics.nginx_http_current_connections:set(total, { "total" })
   end
 
-  metrics.connections:set(ngx.var.connections_active, { "active" })
-  metrics.connections:set(ngx.var.connections_reading, { "reading" })
-  metrics.connections:set(ngx.var.connections_writing, { "writing" })
-  metrics.connections:set(ngx.var.connections_waiting, { "waiting" })
+  metrics.nginx_http_current_connections:set(ngx.var.connections_active, { "active" })
+  metrics.nginx_http_current_connections:set(ngx.var.connections_reading, { "reading" })
+  metrics.nginx_http_current_connections:set(ngx.var.connections_writing, { "writing" })
+  metrics.nginx_http_current_connections:set(ngx.var.connections_waiting, { "waiting" })
 
   -- db reachable?
   local ok, err = kong.db.connector:connect()
@@ -128,4 +196,5 @@ return {
   init    = init,
   log     = log,
   collect = collect,
+  sync    = sync,
 }
