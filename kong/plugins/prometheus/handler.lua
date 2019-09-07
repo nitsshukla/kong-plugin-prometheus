@@ -21,7 +21,7 @@ end
 
 function PrometheusHandler:log(_)
   local message = basic_serializer.serialize(ngx)
-  prometheus.log(message)
+  exporter.log(message)
 end
 
 

@@ -68,14 +68,14 @@ local function sync()
   for k, v in pairs(worker_cache.cache) do
     local meta = metrics_meta[k]
     if meta.type == "gauge" then
-      for label_values, value in pairs(v) do
-        kong.log.err("set ", k, value, require("cjson").encode(label_values))
-        metrics[k]:set(value, label_values)
+      for hash_key, value in pairs(v) do
+        kong.log.err("set ", k, value, require("cjson").encode(worker_cache.hash_label_mapping[hash_key]))
+        metrics[k]:set(value, worker_cache.hash_label_mapping[hash_key])
       end
     elseif meta.type == "counter" then
       -- TODO: check_labels
-      for label_values, value in pairs(v) do
-        metrics[k].prometheus:set(k, meta.labels, label_values, value)
+      for hash_key, value in pairs(v) do
+        metrics[k].prometheus:set(k, meta.labels, worker_cache.hash_label_mapping[hash_key], value)
       end
     elseif meta.type == "histogram" then
       -- TODO: check_labels
