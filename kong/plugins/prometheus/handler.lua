@@ -7,13 +7,6 @@ local timer_at = ngx.timer.at
 
 
 prometheus.init()
-local function log(premature, message)
-  if premature then
-    return
-  end
-
-  prometheus.log(message)
-end
 
 
 local PrometheusHandler = {
@@ -29,10 +22,7 @@ end
 
 function PrometheusHandler:log(_)
   local message = basic_serializer.serialize(ngx)
-  local ok, err = timer_at(0, log, message)
-  if not ok then
-    kong.log.err("failed to create timer: ", err)
-  end
+  prometheus.log(message)
 end
 
 
