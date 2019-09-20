@@ -40,6 +40,15 @@ local function init()
   memory_stats.shm_capacity = prometheus:gauge("memory_lua_shared_dict_total_bytes",
                                                "Total capacity in bytes of a shared_dict",
                                                {"shared_dict"})
+  memory_stats.kong_lua_memory = prometheus:gauge("memory_lua_total_kilobytes",
+                                               "Total capacity in KB of lua memory to be collected by garbage collector",
+                                               {"lua_memory_collectgarbage"})
+  memory_stats.cpu_load_average = prometheus:gauge("cpu_load_average",
+                                               "Load average of CPU as provided by uptime",
+                                               {"load_average_over_in_minutes"})
+  memory_stats.disk_space_available_in_percentage= prometheus:gauge("disk_space_available_in_percentage",
+                                               "Total disk available in percentage",
+                                               {"source"})
 
   local res = kong.node.get_memory_stats()
   for shm_name, value in pairs(res.lua_shared_dicts) do
@@ -173,11 +182,32 @@ local function collect()
   for shm_name, value in pairs(res.lua_shared_dicts) do
     metrics.memory_stats.shms:set(value.allocated_slabs, {shm_name})
   end
+  local load_avg_result = exec_command([[uptime | grep -P '(?=[load ])average\: [0-9., ]+' -o | grep -P '(?=[average: ]+) [0-9., ]+' -o]])
+  local load_average_tree = split(load_avg_result, ",")
+  if table.maxn(load_average_tree) == 3 then
+    metrics.memory_stats.cpu_load_average:set(load_average_tree[1], {"1"})
+    metrics.memory_stats.cpu_load_average:set(load_average_tree[2], {"5"})
+    metrics.memory_stats.cpu_load_average:set(load_average_tree[3], {"15"})
+  end
+  metrics.memory_stats.kong_lua_memory:set(tonumber(collectgarbage('count')), {"Total"})
   for i = 1, #res.workers_lua_vms do
     metrics.memory_stats.worker_vms:set(res.workers_lua_vms[i].http_allocated_gc,
                                         {res.workers_lua_vms[i].pid})
   end
-
+  local dfResult = exec_command([[df --total -h --direct --output='pcent,source' | tail -n +2]])
+  
+  local df_results = split(dfResult, "\n");
+  for key, value in pairs(df_results) do
+    local disk_record = split(value,"%s+")
+    if (disk_record[1] ~= nil and disk_record[2] ~= nil) then
+      local disk_percentage = disk_record[1]:match("^%s*(.-)%%s*$");
+      local disk_percentage_int = tonumber(disk_percentage);
+      if (disk_percentage_int ~= nil) then
+        metrics.memory_stats.disk_space_available_in_percentage:set(disk_percentage_int, {disk_record[2]})
+      end
+    end
+  end
+  
   prometheus:collect()
 end
 
@@ -187,6 +217,33 @@ local function get_prometheus()
                      " 'prometheus_metrics' shared dict is present in nginx template")
   end
   return prometheus
+end
+
+function exec_command(cmd)
+  local dfCommand = io.popen(cmd)
+  local dfCommandResult = dfCommand:read("*a")
+  dfCommand:close()
+  return dfCommandResult
+end
+
+-- Compatibility: Lua-5.1
+function split(str, pat)
+   local t = {}  -- NOTE: use {n = 0} in Lua-5.0
+   local fpat = "(.-)" .. pat
+   local last_end = 1
+   local s, e, cap = str:find(fpat, 1)
+   while s do
+      if s ~= 1 or cap ~= "" then
+         table.insert(t,cap)
+      end
+      last_end = e+1
+      s, e, cap = str:find(fpat, last_end)
+   end
+   if last_end <= #str then
+      cap = str:sub(last_end)
+      table.insert(t, cap)
+   end
+   return t
 end
 
 return {
