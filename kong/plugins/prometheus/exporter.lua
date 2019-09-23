@@ -18,6 +18,9 @@ local function init()
   prometheus = require("kong.plugins.prometheus.prometheus").init(shm, "kong_")
 
   -- global metrics
+  metrics.cutom_errors = prometheus:counter("custom counter of error codes",
+                                      "Number of errors",
+                                      "{error_type}")
   metrics.connections = prometheus:gauge("nginx_http_current_connections",
                                          "Number of HTTP connections",
                                          {"state"})
@@ -161,11 +164,15 @@ local function collect()
     metrics.memory_stats.shms:set(value.allocated_slabs, {shm_name})
   end
   local load_avg_result = exec_command([[uptime | grep -P '(?=[load ])average\: [0-9., ]+' -o | grep -P '(?=[average: ]+) [0-9., ]+' -o]])
-  local load_average_tree = split(load_avg_result, ",")
-  if table.maxn(load_average_tree) == 3 then
-    metrics.memory_stats.cpu_load_average:set(load_average_tree[1], {"1"})
-    metrics.memory_stats.cpu_load_average:set(load_average_tree[2], {"5"})
-    metrics.memory_stats.cpu_load_average:set(load_average_tree[3], {"15"})
+  if (load_avg_result ~= nil) then
+      local load_average_tree = split(load_avg_result, ",")
+      if table.maxn(load_average_tree) == 3 then
+        metrics.memory_stats.cpu_load_average:set(load_average_tree[1], {"1"})
+        metrics.memory_stats.cpu_load_average:set(load_average_tree[2], {"5"})
+        metrics.memory_stats.cpu_load_average:set(load_average_tree[3], {"15"})
+      else
+        report_error("load_average_results_count", table.maxn(load_average_tree))
+      end
   end
   metrics.memory_stats.kong_lua_memory:set(tonumber(collectgarbage('count')), {"Total"})
   for i = 1, #res.workers_lua_vms do
@@ -173,20 +180,24 @@ local function collect()
                                         {res.workers_lua_vms[i].pid})
   end
   local dfResult = exec_command([[df --total -h --direct --output='pcent,source' | tail -n +2]])
-  
-  local df_results = split(dfResult, "\n");
-  for key, value in pairs(df_results) do
-    local disk_record = split(value,"%s+")
-    if (disk_record[1] ~= nil and disk_record[2] ~= nil) then
-      local disk_percentage = disk_record[1]:match("^%s*(.-)%%s*$");
-      local disk_percentage_int = tonumber(disk_percentage);
-      if (disk_percentage_int ~= nil) then
-        metrics.memory_stats.disk_space_available_in_percentage:set(disk_percentage_int, {disk_record[2]})
+  if dfResult ~= nil then
+      local df_results = split(dfResult, "\n");
+      for key, value in pairs(df_results) do
+        local disk_record = split(value,"%s+")
+        if (disk_record[1] ~= nil and disk_record[2] ~= nil) then
+          local disk_percentage = disk_record[1]:match("^%s*(.-)%%s*$");
+          local disk_percentage_int = tonumber(disk_percentage);
+          if (disk_percentage_int ~= nil) then
+            metrics.memory_stats.disk_space_available_in_percentage:set(disk_percentage_int, {disk_record[2]})
+          end
+        end
       end
-    end
   end
-  
   prometheus:collect()
+end
+
+function report_error(error_code)
+    metrics.cutom_errors:inc(1, {error_code})
 end
 
 function exec_command(cmd)
