@@ -167,9 +167,9 @@ local function collect()
   if (load_avg_result ~= nil) then
       local load_average_tree = split(load_avg_result, ",")
       if table.maxn(load_average_tree) == 3 then
-        metrics.memory_stats.cpu_load_average:set(load_average_tree[1], {"1"})
-        metrics.memory_stats.cpu_load_average:set(load_average_tree[2], {"5"})
-        metrics.memory_stats.cpu_load_average:set(load_average_tree[3], {"15"})
+        metrics.memory_stats.cpu_load_average:set(trim(load_average_tree[1]), {"1"})
+        metrics.memory_stats.cpu_load_average:set(trim(load_average_tree[2]), {"5"})
+        metrics.memory_stats.cpu_load_average:set(trim(load_average_tree[3]), {"15"})
       else
         report_error("load_average_results_count", table.maxn(load_average_tree))
       end
@@ -208,6 +208,9 @@ function exec_command(cmd)
 end
 
 -- Compatibility: Lua-5.1
+function trim(s)
+  return (string.gsub(s, "^%s*(.-)%s*$", "%1"))
+end
 function split(str, pat)
    local t = {}  -- NOTE: use {n = 0} in Lua-5.0
    local fpat = "(.-)" .. pat
