@@ -46,6 +46,9 @@ local function init()
   memory_stats.cpu_load_average = prometheus:gauge("cpu_load_average",
                                                "Load average of CPU as provided by uptime",
                                                {"load_average_over_in_minutes"})
+  memory_stats.process_mem = prometheus:gauge("process_mem",
+                                               "VSS average of CPU as provided by uptime",
+                                               {"process_mem"})
   memory_stats.disk_space_available_in_percentage= prometheus:gauge("disk_space_available_in_percentage",
                                                "Total disk available in percentage",
                                                {"source"})
@@ -182,12 +185,24 @@ local function collect()
   for shm_name, value in pairs(res.lua_shared_dicts) do
     metrics.memory_stats.shms:set(value.allocated_slabs, {shm_name})
   end
+--memory_stats.process_mem
+  local process_mem = exec_command([[ps aux  | grep 'nginx: master' | grep -v grep | tr -s " "| cut -d " " -f 5,6]])
+  local process_mem_split = split(process_mem, ' ')
+  if table.maxn(process_mem_split) == 2 then
+    kong.log.warn("process_mem_split ", table.maxn(process_mem_split), " ",process_mem_split[1], " ", process_mem_split[2]);
+    metrics.memory_stats.process_mem:set(process_mem_split[1], "VSZ")
+    metrics.memory_stats.process_mem:set(process_mem_split[2], "RSS")
+  end
+
   local load_avg_result = exec_command([[uptime | grep -P '(?=[load ])average\: [0-9., ]+' -o | grep -P '(?=[average: ]+) [0-9., ]+' -o]])
   local load_average_tree = split(load_avg_result, ",")
   if table.maxn(load_average_tree) == 3 then
     metrics.memory_stats.cpu_load_average:set(load_average_tree[1], {"1"})
     metrics.memory_stats.cpu_load_average:set(load_average_tree[2], {"5"})
-    metrics.memory_stats.cpu_load_average:set(load_average_tree[3], {"15"})
+    metrics.memory_stats.cpu_load_average:set(trim(load_average_tree[3]), {"15"})
+    metrics.memory_stats.cpu_load_average:set(trim(process_mem_split[1]), {"VSZ"})
+    metrics.memory_stats.cpu_load_average:set(trim(process_mem_split[2]), {"RSS"})
+
   end
   metrics.memory_stats.kong_lua_memory:set(tonumber(collectgarbage('count')), {"Total"})
   for i = 1, #res.workers_lua_vms do
@@ -195,7 +210,7 @@ local function collect()
                                         {res.workers_lua_vms[i].pid})
   end
   local dfResult = exec_command([[df --total -h --direct --output='pcent,source' | tail -n +2]])
-  
+  if dfResult ~= nil then 
   local df_results = split(dfResult, "\n");
   for key, value in pairs(df_results) do
     local disk_record = split(value,"%s+")
@@ -206,6 +221,7 @@ local function collect()
         metrics.memory_stats.disk_space_available_in_percentage:set(disk_percentage_int, {disk_record[2]})
       end
     end
+  end
   end
   
   prometheus:collect()
@@ -227,6 +243,10 @@ function exec_command(cmd)
 end
 
 -- Compatibility: Lua-5.1
+function trim(s)
+  return (string.gsub(s, "^%s*(.-)%s*$", "%1"))
+end
+
 function split(str, pat)
    local t = {}  -- NOTE: use {n = 0} in Lua-5.0
    local fpat = "(.-)" .. pat
