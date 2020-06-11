@@ -186,13 +186,6 @@ local function collect()
     metrics.memory_stats.shms:set(value.allocated_slabs, {shm_name})
   end
 --memory_stats.process_mem
-  local process_mem = exec_command([[ps aux  | grep 'nginx: master' | grep -v grep | tr -s " "| cut -d " " -f 5,6]])
-  local process_mem_split = split(process_mem, ' ')
-  if table.maxn(process_mem_split) == 2 then
-    kong.log.warn("process_mem_split ", table.maxn(process_mem_split), " ",process_mem_split[1], " ", process_mem_split[2]);
-    metrics.memory_stats.process_mem:set(process_mem_split[1], "VSZ")
-    metrics.memory_stats.process_mem:set(process_mem_split[2], "RSS")
-  end
 
   local top_data_raw = exec_command([[top -b | head -n18 | tail -n 10]])
   local rows = split(top_data_raw, '\n')
@@ -208,8 +201,6 @@ local function collect()
     metrics.memory_stats.cpu_load_average:set(load_average_tree[1], {"1"})
     metrics.memory_stats.cpu_load_average:set(load_average_tree[2], {"5"})
     metrics.memory_stats.cpu_load_average:set(trim(load_average_tree[3]), {"15"})
-    metrics.memory_stats.cpu_load_average:set(trim(process_mem_split[1]), {"VSZ"})
-    metrics.memory_stats.cpu_load_average:set(trim(process_mem_split[2]), {"RSS"})
 
   end
   metrics.memory_stats.kong_lua_memory:set(tonumber(collectgarbage('count')), {"Total"})
