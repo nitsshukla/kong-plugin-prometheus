@@ -194,6 +194,14 @@ local function collect()
     metrics.memory_stats.process_mem:set(process_mem_split[2], "RSS")
   end
 
+  local top_data_raw = exec_command([[top -b | head -n18 | tail -n 10]])
+  local rows = split(top_data_raw, '\n')
+  kong.log.warn('rows ', table.maxn(rows))
+  for key, value in pairs(rows) do
+    local data = split(value, '%s%s+')
+    metrics.memory_stats.cpu_load_average:set(trim(data[8]), {data[9]}) 
+  end
+
   local load_avg_result = exec_command([[uptime | grep -P '(?=[load ])average\: [0-9., ]+' -o | grep -P '(?=[average: ]+) [0-9., ]+' -o]])
   local load_average_tree = split(load_avg_result, ",")
   if table.maxn(load_average_tree) == 3 then
