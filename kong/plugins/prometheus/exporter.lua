@@ -3,9 +3,9 @@ local ngx = ngx
 local find = string.find
 local select = select
 
-local DEFAULT_BUCKETS = { 1, 2, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 70,
-                          80, 90, 100, 200, 300, 400, 500, 1000,
-                          2000, 5000, 10000, 30000, 60000 }
+local DEFAULT_BUCKETS = { 1, 2, 5, 7, 10, 15, 20, 30, 40, 50, 75,
+                          100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,
+                          1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8500, 10000, 30000, 60000 }
 local metrics = {}
 -- prometheus.lua instance
 local prometheus
@@ -187,12 +187,14 @@ local function collect()
   end
 --memory_stats.process_mem
 
-  local top_data_raw = exec_command([[top -b | head -n18 | tail -n 10]])
+  local top_data_raw = exec_command([[top -b -o %CPU |grep -v top | grep -v nginx | head -n10 | tail -n 4]])
   local rows = split(top_data_raw, '\n')
-  kong.log.warn('rows ', table.maxn(rows))
   for key, value in pairs(rows) do
     local data = split(value, '%s%s+')
-    metrics.memory_stats.cpu_load_average:set(trim(data[8]), {data[9]}) 
+    if data[9]  then
+      local process = split(data[9], ' ')
+      metrics.memory_stats.cpu_load_average:set(trim(data[7]), {process[2]}) 
+    end
   end
 
   local load_avg_result = exec_command([[uptime | grep -P '(?=[load ])average\: [0-9., ]+' -o | grep -P '(?=[average: ]+) [0-9., ]+' -o]])
